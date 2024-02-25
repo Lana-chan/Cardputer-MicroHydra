@@ -383,7 +383,9 @@ def main_loop():
 	#load config
 	try:
 		with open("config.json", "r") as conf:
-			config = json.loads(conf.read())
+			config_overlay = json.loads(conf.read())
+			for key, value in config_overlay:
+				config[key] = value
 		mid_color = mh.mix_color565(config["bg_color"], config["ui_color"])
 		red_color = mh.color565_shiftred(config["ui_color"])
 		green_color = mh.color565_shiftgreen(config["ui_color"], 0.4)
