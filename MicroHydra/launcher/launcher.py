@@ -109,19 +109,13 @@ config = {
 	"timezone": 0
 }
 
-
 mid_color = mh.mix_color565(config["bg_color"], config["ui_color"])
 red_color = mh.color565_shiftred(config["ui_color"])
 green_color = mh.color565_shiftgreen(config["ui_color"], 0.4)
 
 widget_scroll_w = display_width
 
-battery_widget = [
-	{"icon": battery.EMPTY, "color": red_color},
-	{"icon": battery.LOW, "color": config["ui_color"]},
-	{"icon": battery.HIGH, "color": config["ui_color"]},
-	{"icon": battery.FULL, "color": green_color}
-]
+battery_widget = []
 
 tft = None
 beep = None
@@ -245,15 +239,6 @@ def scan_apps(sd):
 	widget_scroll_w = display_width // len(app_names)
 	
 	return app_names, app_paths, sd
-
-
-
-
-
-
-
-
-
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Function Definitions: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -384,18 +369,22 @@ def main_loop():
 	try:
 		with open("config.json", "r") as conf:
 			config_overlay = json.loads(conf.read())
-			for key, value in config_overlay:
-				config[key] = value
-		mid_color = mh.mix_color565(config["bg_color"], config["ui_color"])
-		red_color = mh.color565_shiftred(config["ui_color"])
-		green_color = mh.color565_shiftgreen(config["ui_color"], 0.4)
-		battery_widget[0]["color"] = red_color
-		battery_widget[3]["color"] = green_color
+			for key in config_overlay:
+				config[key] = config_overlay[key]
 	except:
 		print("could not load settings from config.json. reloading default values.")
 		config_modified = True
 		with open("config.json", "w") as conf:
 			conf.write(json.dumps(config))
+	mid_color = mh.mix_color565(config["bg_color"], config["ui_color"])
+	red_color = mh.color565_shiftred(config["ui_color"])
+	green_color = mh.color565_shiftgreen(config["ui_color"], 0.4)
+	battery_widget = [
+		{"icon": battery.EMPTY, "color": red_color},
+		{"icon": battery.LOW, "color": config["ui_color"]},
+		{"icon": battery.HIGH, "color": config["ui_color"]},
+		{"icon": battery.FULL, "color": green_color}
+	]
 		
 	# sync our RTC on boot, if set in settings
 	syncing_clock = config["sync_clock"]
