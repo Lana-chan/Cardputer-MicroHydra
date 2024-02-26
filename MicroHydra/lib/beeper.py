@@ -1,5 +1,4 @@
 from machine import I2S, Pin
-import math
 
 fast_sin_len = const(320)
 fast_sin_hz = const(25)

@@ -1,13 +1,22 @@
-from machine import Pin, SDCard, SPI, RTC, ADC
-import time, os, json, math, ntptime, network
-from lib import keyboard, beeper#, gui
-from lib import microhydra as mh
-import machine
-from lib import st7789py as st7789
-from launcher.icons import icons, battery
+import network
+from lib import beeper
+
+# wifi and beeper consume most memory
+nic = network.WLAN(network.STA_IF)
+beep = beeper.Beeper()
+
+import gc
+gc.collect()
+
 from font import vga1_8x16 as fontsmall
 from font import vga2_16x32 as font
-
+from machine import Pin, SDCard, SPI, ADC, RTC, reset
+import time, os, json, math, ntptime
+from lib import keyboard
+from lib import microhydra as mh
+gc.collect()
+from lib import st7789py as st7789
+from launcher.icons import icons, battery
 
 
 
@@ -118,7 +127,7 @@ widget_scroll_w = display_width
 battery_widget = []
 
 tft = None
-beep = None
+rtc = RTC()
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Finding Apps ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -246,13 +255,12 @@ def scan_apps(sd):
 
 def launch_app(app_path):
 	#print(f'launching {app_path}')
-	rtc = machine.RTC()
 	rtc.memory(app_path)
 	print(f"Launching '{app_path}...'")
 	# reset clock speed to default. 
-	machine.freq(160_000_000)
+	#machine.freq(160_000_000)
 	time.sleep_ms(10)
-	machine.reset()
+	reset()
 	
 
 
@@ -357,7 +365,7 @@ def main_loop():
 	global mid_color, red_color, green_color
 	global widget_scroll_w
 	global battery_widget
-	global tft, beep
+	global tft, beep, nic
 
 	#bump up our clock speed so the UI feels smoother (240mhz is the max officially supported, but the default is 160mhz)
 	#machine.freq(240_000_000)
@@ -390,20 +398,19 @@ def main_loop():
 	syncing_clock = config["sync_clock"]
 	sync_ntp_attemps = 0
 	connect_wifi_attemps = 0
-	rtc = machine.RTC()
 	
 	#wifi loves to give unknown runtime errors, just try it twice:
-	nic = None
-	try:
-		nic = network.WLAN(network.STA_IF)
-	except RuntimeError as e:
-		print(e)
+	if not nic:
 		try:
 			nic = network.WLAN(network.STA_IF)
 		except RuntimeError as e:
-			print("Wifi WLAN object couldnt be created. Gave this error:",e)
-			import micropython
-			print(micropython.mem_info(),micropython.qstr_info())
+			print(e)
+			try:
+				nic = network.WLAN(network.STA_IF)
+			except RuntimeError as e:
+				print("Wifi WLAN object couldnt be created. Gave this error:",e)
+				import micropython
+				print(micropython.mem_info(),micropython.qstr_info())
 		
 	if config["wifi_ssid"] == '':
 		syncing_clock = False # no point in wasting resources if wifi hasn't been setup
@@ -464,9 +471,6 @@ def main_loop():
 	
 	scroll_direction = 0 #1 for right, -1 for left, 0 for center
 	refresh_timer = 0
-	
-	#init the beeper!
-	beep = beeper.Beeper()
 	
 	#starupp sound
 	play_sound(('C3',
