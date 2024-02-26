@@ -1,6 +1,4 @@
-import os
-import machine
-from machine import RTC
+from machine import RTC, reset_cause, PWRON_RESET
 from sys import path
 
 
@@ -10,8 +8,8 @@ app_path = "/launcher/launcher.py"
 
 
 	
-if machine.reset_cause() != machine.PWRON_RESET: #if this was not a power reset, we are probably launching an app!
-	rtc = machine.RTC()
+if reset_cause() != PWRON_RESET: #if this was not a power reset, we are probably launching an app!
+	rtc = RTC()
 	app_path = rtc.memory().decode()
 	rtc.memory("/launcher/launcher.py") # just in case we reset again
 
@@ -23,9 +21,10 @@ path.append('/apps')
 if len(app_path) >= 4: # if the string is too short it cant possibly be on sd.
 	if app_path[:3] == "/sd":
 		from machine import SDCard, Pin # trying to save memory by only importing this if we have to
+		from os import mount
 		sd = SDCard(slot=2, sck=Pin(40), miso=Pin(39), mosi=Pin(14), cs=Pin(12))
 		try:
-			os.mount(sd, '/sd')
+			mount(sd, '/sd')
 			path.append('/sd/apps')
 		except OSError:
 			print("Could not mount SDCard!")

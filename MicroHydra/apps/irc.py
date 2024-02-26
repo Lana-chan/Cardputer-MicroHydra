@@ -1,21 +1,75 @@
-import json, network, gc, time
-import usocket as socket
-from machine import Pin, SPI
+_DISPLAY_WIDTH = const(240)
+_DISPLAY_HEIGHT = const(135)
+import gc
+fbuf = bytearray(_DISPLAY_WIDTH * _DISPLAY_HEIGHT * 2)
+gc.collect()
+print(gc.mem_free())
 from lib import st7789fbuf as st7789
+from machine import Pin, SPI
+
+spi = SPI(1, baudrate=40000000, sck=Pin(36), mosi=Pin(35), miso=None)
+tft = st7789.ST7789(
+	spi,
+	_DISPLAY_HEIGHT,
+	_DISPLAY_WIDTH,
+	reset=Pin(33, Pin.OUT),
+	cs=Pin(37, Pin.OUT),
+	dc=Pin(34, Pin.OUT),
+	backlight=Pin(38, Pin.OUT),
+	rotation=1,
+	color_order=st7789.BGR,
+	fbuf = fbuf
+)
+
+import network
+nic = network.WLAN(network.STA_IF)
+
+import json, time
+import usocket as socket
 from lib import keyboard
 from font import vga1_8x16 as font
 
-_BACKLOG_LEN = const(30)
+_BACKLOG_LEN = const(15)
 _STATUS_NAME = const("Status")
-_REFRESH_INPUT = 1
-_REFRESH_FULL = 2
+_REFRESH_INPUT = const(1)
+_REFRESH_FULL = const(2)
 
-nic = None
+class Console():
+	def __init__(self):
+		self.cursor = [0, 0]
+		self.refresh_needed = 0
+		self.console_size = (_DISPLAY_WIDTH // font.WIDTH, _DISPLAY_HEIGHT // font.HEIGHT)
+		tft.fill_rect(0, 0, _DISPLAY_WIDTH, _DISPLAY_HEIGHT, 0)
+
+	def refresh(self):
+		if self.refresh_needed != 0 and len(irc.channels) > 0:
+			channel = irc.channels[list(irc.channels)[irc.current_channel]]
+
+			if self.refresh_needed == _REFRESH_FULL:
+				tft.fill_rect(0, 0, _DISPLAY_WIDTH, _DISPLAY_HEIGHT, 0)
+				line_index = len(channel.msg_buffer)-1
+				self.cursor[1] = self.console_size[1]-2
+				while self.cursor[1] >= 0 and line_index >= 0:
+					tft.bitmap_text(font, channel.msg_buffer[line_index], 0, self.cursor[1] * font.HEIGHT, st7789.WHITE)
+					self.cursor[1] -= 1
+					line_index -= 1
+			
+			self.cursor[1] = self.console_size[1]-1
+			if self.refresh_needed == _REFRESH_INPUT:
+				tft.fill_rect(0, self.cursor[1] * font.HEIGHT, _DISPLAY_WIDTH, font.HEIGHT, 0)
+
+			input_line = f"{channel.name}> {channel.input_buffer}"
+			if len(input_line) > self.console_size[0]:
+				input_line = input_line[-self.console_size[0]:]
+			tft.bitmap_text(font, input_line, 0, self.cursor[1] * font.HEIGHT, st7789.YELLOW)
+
+			self.refresh_needed = 0
+			tft.show()
+
 config = {}
 irc = None
-spi = None
-tft = None
 kb = None
+screen = None
 pressed_keys = []
 prev_pressed_keys = []
 
@@ -33,21 +87,24 @@ def init_config():
 
 def init_nic():
 	global nic
-	try:
-		nic = network.WLAN(network.STA_IF)
-	except RuntimeError as e:
-		print(e)
+	gc.collect()
+	if not nic:
 		try:
-			time.sleep(5)
 			nic = network.WLAN(network.STA_IF)
 		except RuntimeError as e:
-			screen.tft.bitmap_text(TFT.font, "failed to setup WLAN!", 0, 0, st7789.RED)
-			print("Wifi WLAN object couldnt be created. Gave this error:",e)
-			import micropython
-			print(micropython.mem_info(),micropython.qstr_info())
-			return False
+			print(e)
+			try:
+				time.sleep(5)
+				nic = network.WLAN(network.STA_IF)
+			except RuntimeError as e:
+				tft.bitmap_text(font, "failed to setup WLAN!", 0, 0, st7789.RED)
+				print("Wifi WLAN object couldnt be created. Gave this error:",e)
+				import micropython
+				print(micropython.mem_info(),micropython.qstr_info())
+				return False
 
 	if config["wifi_ssid"] == '':
+		print(config)
 		print("wifi information not found in config")
 		return False
 
@@ -59,7 +116,7 @@ def init_nic():
 			while not nic.isconnected():
 				pass
 		except OSError as e:
-			print("wifi_sync_rtc had this error when connecting:",e)
+			print("wifi_sync_rtc had this error when connecting:",str(e))
 			return False
 	
 	return True
@@ -113,7 +170,7 @@ def handle_keyboard():
 			elif key == "SPC":
 				irc.channels[channel].input_buffer += ' '
 				screen.refresh_needed = _REFRESH_INPUT
-			elif key in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890.,<>?"\':;[{}]\\|-_=+!@#$%^&*()`~':
+			elif key in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890.,<>?"\':;[{}]\\|-_=+!@#$%^&*()`~/':
 				irc.channels[channel].input_buffer += key
 				screen.refresh_needed = _REFRESH_INPUT
 			
@@ -230,77 +287,30 @@ class IRC:
 		if not user: return None
 		return user.split('!')[0].strip(':')
 
-class TFT():
-	display_width = const(240)
-	display_height = const(135)
-	font = font
-
-	def __init__(self):
-		self.cursor = [0, 0]
-		self.refresh_needed = 0
-		global spi
-		spi = SPI(1, baudrate=40000000, sck=Pin(36), mosi=Pin(35), miso=None)
-		self.tft = st7789.ST7789(
-			spi,
-			TFT.display_height,
-			TFT.display_width,
-			reset=Pin(33, Pin.OUT),
-			cs=Pin(37, Pin.OUT),
-			dc=Pin(34, Pin.OUT),
-			backlight=Pin(38, Pin.OUT),
-			rotation=1,
-			color_order=st7789.BGR
-		)
-		#self.tft.offset(40, 53)
-		#self.tft.init()
-		self.console_size = (TFT.display_width // TFT.font.WIDTH, TFT.display_height // TFT.font.HEIGHT)
-		self.tft.fill_rect(0, 0, TFT.display_width, TFT.display_height, 0)
-
-	def refresh(self):
-		if self.refresh_needed != 0 and len(irc.channels) > 0:
-			channel = irc.channels[list(irc.channels)[irc.current_channel]]
-
-			if self.refresh_needed == _REFRESH_FULL:
-				self.tft.fill_rect(0, 0, TFT.display_width, TFT.display_height, 0)
-				line_index = len(channel.msg_buffer)-1
-				self.cursor[1] = self.console_size[1]-2
-				while self.cursor[1] >= 0 and line_index >= 0:
-					self.tft.bitmap_text(TFT.font, channel.msg_buffer[line_index], 0, self.cursor[1] * TFT.font.HEIGHT, st7789.WHITE)
-					self.cursor[1] -= 1
-					line_index -= 1
-			
-			self.cursor[1] = self.console_size[1]-1
-			if self.refresh_needed == _REFRESH_INPUT:
-				self.tft.fill_rect(0, self.cursor[1] * TFT.font.HEIGHT, TFT.display_width, TFT.font.HEIGHT, 0)
-
-			input_line = f"{channel.name}> {channel.input_buffer}"
-			if len(input_line) > self.console_size[0]:
-				input_line = input_line[-self.console_size[0]:]
-			self.tft.bitmap_text(TFT.font, input_line, 0, self.cursor[1] * TFT.font.HEIGHT, st7789.YELLOW)
-
-			self.refresh_needed = 0
-			self.tft.show()
-
 def init():
-	global irc, screen, kb
-	screen = TFT()
+	global irc, kb, screen
+	print("init!")
+	screen = Console()
 
 	if not init_config():
-		screen.tft.bitmap_text(TFT.font, "failed to open config!", 0, 0, st7789.RED)
+		print("failed to open config!")
+		tft.bitmap_text(font, "failed to open config!", 0, 0, st7789.RED)
 		return False
 	if not init_nic():
-		screen.tft.bitmap_text(TFT.font, "no wifi config found!", 0, 0, st7789.RED)
+		print("no wifi config found!")
+		tft.bitmap_text(font, "no wifi config found!", 0, 0, st7789.RED)
 		return False
 	
 	kb = keyboard.KeyBoard()
 	
 	try:
-		if config["irc_password"] and config["irc_pass"] != "":
+		if "irc_pass" in config and config["irc_pass"] != "":
 			irc = IRC(config["irc_nick"], config["irc_server"], config["irc_port"], config["irc_pass"])
 		else:
 			irc = IRC(config["irc_nick"], config["irc_server"], config["irc_port"])
-	except:
-		screen.tft.bitmap_text(TFT.font, "no irc config found!", 0, 0, st7789.RED)
+	except Exception as e:
+		print("no irc config found!")
+		tft.bitmap_text(font, "no irc config found!", 0, 0, st7789.RED)
 		return False
 	
 	irc.connect()

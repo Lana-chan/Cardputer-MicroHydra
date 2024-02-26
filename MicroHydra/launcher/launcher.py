@@ -259,7 +259,7 @@ def launch_app(app_path):
 	print(f"Launching '{app_path}...'")
 	# reset clock speed to default. 
 	#machine.freq(160_000_000)
-	time.sleep_ms(10)
+	time.sleep_ms(50)
 	reset()
 	
 
