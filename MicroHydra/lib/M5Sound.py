@@ -11,6 +11,7 @@
 """
 
 from machine import Pin, I2S
+import time
 
 class M5Sound:
 	PERIODS = [ # c0 thru a0 - how much to advance a sample pointer per frame for each note
@@ -62,7 +63,7 @@ class M5Sound:
 	def __del__(self):
 		self._output.deinit()
 
-	def play(self, sample, note=0, octave=4, volume=16, channel=0, loop=False):
+	def play(self, sample, note=0, octave=4, volume=15, channel=0, loop=False):
 		self._sample[channel] = sample
 		self._sample_len[channel] = len(sample) // 2 # length of 16bit sample
 		self._pointer[channel] = 0
@@ -78,7 +79,7 @@ class M5Sound:
 		if volume < 1:
 			self._sample = None
 			return
-		self._volume[channel] = 16 - 1 if volume < 1 else 16 if volume > 16 else volume
+		self._volume[channel] = 15 - (1 if volume < 1 else 15 if volume > 15 else volume)
 
 	def stop(self, channel=0):
 		self._loop[channel] = False
@@ -107,7 +108,12 @@ class M5Sound:
 							self._sample[ch] = None
 							continue
 						ptr = uint(0) # or loop
-					buf[i] += smp[ptr] >> vol
+					bsmp = smp[ptr]
+					# ladies and gentlemen, the two's complement
+					bsmp = (bsmp & 0b1000000000000000) | ((bsmp & 0b0111111111111111) >> vol)
+					if (bsmp & 0b1000000000000000) != 0:
+						bsmp |= (0b111111111111111 << 15-vol)
+					buf[i] += bsmp
 					for _ in range(int(self._period_mult[ch])): # add together frame periods for different octaves
 						ptr += per[perptr]
 						perptr += 1
