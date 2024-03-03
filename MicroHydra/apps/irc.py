@@ -3,7 +3,6 @@ _DISPLAY_HEIGHT = const(135)
 import gc
 fbuf = bytearray(_DISPLAY_WIDTH * _DISPLAY_HEIGHT * 2)
 gc.collect()
-print(gc.mem_free())
 from lib import st7789fbuf as st7789
 from machine import Pin, SPI
 
@@ -289,7 +288,7 @@ class IRC:
 
 def init():
 	global irc, kb, screen
-	print("init!")
+	gc.collect()
 	screen = Console()
 
 	if not init_config():
