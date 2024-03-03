@@ -86,6 +86,12 @@ class M5Sound:
 		self._sample[channel] = None
 
 	@micropython.viper
+	def _vipmod(self, a:uint, b:uint) -> uint:
+		while a >= b:
+			a -= b
+		return a
+
+	@micropython.viper
 	def _fill_buffer(self, arg):
 		self._last_tick = uint(time.ticks_us())
 		self._output.write(self._buffer)
@@ -107,7 +113,7 @@ class M5Sound:
 						if not self._loop[ch]: # stop playing
 							self._sample[ch] = None
 							continue
-						ptr = uint(0) # or loop
+						ptr = uint(self._vipmod(ptr, slen)) # or loop
 					bsmp = smp[ptr]
 					# ladies and gentlemen, the two's complement
 					bsmp = (bsmp & 0b1000000000000000) | ((bsmp & 0b0111111111111111) >> vol)
