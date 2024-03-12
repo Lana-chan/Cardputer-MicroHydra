@@ -10,10 +10,15 @@
  */
 """
 
-from machine import Pin, I2S
-import time
+## !!!
+## this lib NEEDS micropython 1.23.0 or above!
+## see https://github.com/micropython/micropython/pull/13727
+## !!!
 
-_PERIODS = [ # c0 thru a0 - how much to advance a sample pointer per frame for each note
+from machine import Pin, I2S
+import time, array
+
+_PERIODS = [ # c-0 thru b-0 - how much to advance a sample pointer per frame for each note
 	b'\x01\x00\x00\x00\x00\x00\x00\x00',
 	b'\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00',
 	b'\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00',
@@ -28,14 +33,12 @@ _PERIODS = [ # c0 thru a0 - how much to advance a sample pointer per frame for e
 	b'\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00'
 ]
 
-_MIN_VOLUME = const(0)
-_MAX_VOLUME = const(15)
 @micropython.native
 def _volume(volume):
-	return _MAX_VOLUME - (_MIN_VOLUME if volume < _MIN_VOLUME else _MAX_VOLUME if volume > _MAX_VOLUME else volume)
+	return 15 - (0 if volume < 0 else 15 if volume > 15 else volume)
 
 @micropython.viper
-def _vipmod(a:uint, b:uint) -> uint:
+def _vipmod(a:int, b:int) -> int:
 	while a >= b:
 		a -= b
 	return a
@@ -77,14 +80,15 @@ class M5Sound:
 			sd=Pin(sd),
 			mode=I2S.TX,
 			bits=16,
-			format=I2S.STEREO,
+			format=I2S.MONO,
 			rate=rate,
 			ibuf=buf_size
 		)
 		
 		self._rate = rate
 		self._buf_size:int = buf_size
-		self._buffer = bytearray(buf_size*2) # twice for stereo
+		self._buffer = array.array('h', range(buf_size))
+		self._buf_mv = memoryview(self._buffer)
 		self.channels = channels
 		self._registers = [Register() for _ in range(channels)]
 		self._queues = [[] for _ in range(channels)]
@@ -97,7 +101,7 @@ class M5Sound:
 
 	@micropython.native
 	def _gen_buf_start(self):
-		return int((time.ticks_diff(time.ticks_us(), self._last_tick) // (1000000 / self._rate)) * 2) # stereo
+		return int((time.ticks_diff(time.ticks_us(), self._last_tick) // (1000000 / self._rate)))
 
 	@micropython.native
 	def play(self, sample, note=0, octave=4, volume=15, channel=0, loop=False):
@@ -107,15 +111,14 @@ class M5Sound:
 			sample_len = len(sample) // 2,
 			loop = loop,
 			note = note % 12,
-			period_mult = 2 ** (octave + (note // 12)),
+			period_mult = 2 ** ((octave-1 if octave > 0 else 0) + (note // 12)),
 			volume = volume
 		)
 		self._queues[channel].append(registers)
 
 	@micropython.native
 	def stop(self, channel=0):
-		registers = Register() # default has empty sample
-		registers.buf_start = self._gen_buf_start()
+		registers = Register(buf_start=self._gen_buf_start()) # default has empty sample
 		self._queues[channel].append(registers)
 
 	@micropython.native
@@ -130,39 +133,39 @@ class M5Sound:
 
 	@micropython.viper
 	def _clear_buffer(self):
-		buf = ptr16(self._buffer)
+		buf = ptr16(self._buf_mv)
 		for i in range(0, int(self._buf_size)):
 			buf[i] = 0
 
 	@micropython.viper
 	def _fill_buffer(self, registers, end:int) -> bool:
-		buf = ptr16(self._buffer)
-		start = 1 + int(registers.buf_start)
+		buf = ptr16(self._buf_mv)
+		start = int(registers.buf_start)
 		smp = ptr16(registers.sample)
-		slen = uint(registers.sample_len)
-		ptr = uint(registers.pointer)
+		slen = int(registers.sample_len)
+		ptr = int(registers.pointer)
 		per = ptr8(_PERIODS[registers.note])
-		perlen = uint(len(_PERIODS[registers.note]))
-		perptr = uint(registers.period)
+		perlen = int(len(_PERIODS[registers.note]))
+		perptr = int(registers.period)
 		permult = int(registers.period_mult)
-		vol = uint(_volume(registers.volume))
+		vol = int(_volume(registers.volume))
 		loop = bool(registers.loop)
-		for i in range(start, end, 2): # odd word: right channel only
+		for i in range(start, end):
 			if ptr >= slen: # sample ended
 				if not loop: # stop playing
 					return False
-				ptr = uint(_vipmod(ptr, slen)) # or loop
-			bsmp = smp[ptr]
+				ptr = int(_vipmod(ptr, slen)) # or loop
+			bsmp = int(smp[ptr])
 			# ladies and gentlemen, the two's complement
 			bsmp = (bsmp & 0b1000000000000000) | ((bsmp & 0b0111111111111111) >> vol)
 			if (bsmp & 0b1000000000000000) != 0:
 				bsmp |= (0b111111111111111 << 15-vol)
 			buf[i] += bsmp
 			for _ in range(permult): # add together frame periods for different octaves
-				ptr += per[perptr]
-				perptr += uint(1)
+				ptr += per[perptr] << 1
+				perptr += int(1)
 				if perptr >= perlen:
-					perptr = uint(0)
+					perptr = int(0)
 		registers.buf_start = 0
 		registers.pointer = ptr
 		registers.period = perptr
@@ -170,25 +173,26 @@ class M5Sound:
 
 	@micropython.native
 	def _process_buffer(self, arg):
-		self._last_tick = time.ticks_us()
-		self._output.write(self._buffer)
+		self._output.write(self._buf_mv)
 		self._clear_buffer()
+		self._last_tick = time.ticks_us()
 
-		for ch in range(0, int(self.channels)):
+		for ch in range(int(self.channels)):
 			playing = True
 			while playing:
 				registers = self._registers[ch]
 
 				end = self._buf_size
-				if len(self._queues[ch]) > 0:
-					if self._queues[ch][0].buf_start >= self._buf_size:
-						self._queues[ch][0].buf_start -= self._buf_size
-					else:
-						end = self._queues[ch][0].buf_start
-						self._registers[ch] = self._queues[ch].pop(0)
+				if len(self._queues[ch]) > 0 and self._queues[ch][0].buf_start < self._buf_size:
+					end = self._queues[ch][0].buf_start
+					self._registers[ch] = self._queues[ch].pop(0)
 				else:
 					playing = False
 
 				if registers.sample:
 					if not self._fill_buffer(registers, end):
 						registers.sample = None
+			
+			for reg in self._queues[ch]:
+				if reg.buf_start >= self._buf_size:
+					reg.buf_start -= self._buf_size
