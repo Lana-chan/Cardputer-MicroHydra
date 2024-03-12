@@ -1,19 +1,23 @@
-"""
-/*
- * ----------------------------------------------------------------------------
- * "THE BEER-WARE LICENSE" (Revision 42 modified):
- * <maple@maple.pet> wrote this file.  As long as you retain this notice and
- * my credit somewhere you can do whatever you want with this stuff.  If we
- * meet some day, and you think this stuff is worth it, you can buy me a beer
- * in return.
- * ----------------------------------------------------------------------------
- */
-"""
+#/*
+# * ----------------------------------------------------------------------------
+# * "THE BEER-WARE LICENSE" (Revision 42 modified):
+# * <maple@maple.pet> wrote this file.  As long as you retain this notice and
+# * my credit somewhere you can do whatever you want with this stuff.  If we
+# * meet some day, and you think this stuff is worth it, you can buy me a beer
+# * in return.
+# * ----------------------------------------------------------------------------
+# */
 
 ## !!!
 ## this lib NEEDS micropython 1.23.0 or above!
 ## see https://github.com/micropython/micropython/pull/13727
 ## !!!
+
+"""
+Library for I2S software sound mixing developed primarily for the M5 Cardputer.
+
+https://maple.pet/
+"""
 
 from machine import Pin, I2S
 import time, array
@@ -35,15 +39,18 @@ _PERIODS = [ # c-0 thru b-0 - how much to advance a sample pointer per frame for
 
 @micropython.native
 def _volume(volume):
+	"""Returns volume 0-15 reversed in order to be used in bitshifting."""
 	return 15 - (0 if volume < 0 else 15 if volume > 15 else volume)
 
 @micropython.viper
 def _vipmod(a:int, b:int) -> int:
+	"""Quick viper-friendly modulo."""
 	while a >= b:
 		a -= b
 	return a
 
 class Register:
+	"""Stores settings for timed playback of samples in M5Sound."""
 	def __init__(self, buf_start=0, sample=None, sample_len=0, pointer=0, note=0, period=1, period_mult=4, loop=False, volume=0):
 		self.buf_start = buf_start
 		self.sample = sample
@@ -105,6 +112,15 @@ class M5Sound:
 
 	@micropython.native
 	def play(self, sample, note=0, octave=4, volume=15, channel=0, loop=False):
+		"""Schedules a sample to be played immediately.
+		
+		- sample: Bytearray or MemoryView for a sample. Must be 16bits mono, sample rate matching M5Sound constructor.
+		- note: Numerical 0-12 mapping from C-0 to B-0. Numbers outside that range will affect octave as well.
+		- octave: Octave to play the sample at. By default C-4 which corresponds to unalterated sample.
+		- volume: Volume the sample should play at, range 0-15.
+		- channel: Channel the sample should play on, must be within range of channels defined in M5Sound constructor.
+		- loop: If True, sample will loop forever until channel is stopped.
+		"""
 		registers = Register(
 			buf_start = self._gen_buf_start(),
 			sample = sample,
@@ -118,11 +134,13 @@ class M5Sound:
 
 	@micropython.native
 	def stop(self, channel=0):
+		"""Schedules a channel to stop playing immediately."""
 		registers = Register(buf_start=self._gen_buf_start()) # default has empty sample
 		self._queues[channel].append(registers)
 
 	@micropython.native
 	def setvolume(self, volume, channel=0):
+		"""Sets the volume of a channel immediately, preserving sample already being played there."""
 		if len(self._queues[channel]) > 0:
 			registers = self._queues[channel][-1].copy()
 		else:
@@ -133,12 +151,14 @@ class M5Sound:
 
 	@micropython.viper
 	def _clear_buffer(self):
+		"""Zero out internal buffer."""
 		buf = ptr16(self._buf_mv)
 		for i in range(0, int(self._buf_size)):
 			buf[i] = 0
 
 	@micropython.viper
 	def _fill_buffer(self, registers, end:int) -> bool:
+		"""Takes a sample register and fills internal buffer with it."""
 		buf = ptr16(self._buf_mv)
 		start = int(registers.buf_start)
 		smp = ptr16(registers.sample)
@@ -173,6 +193,7 @@ class M5Sound:
 
 	@micropython.native
 	def _process_buffer(self, arg):
+		"""I2S IRQ function to process register queue."""
 		self._output.write(self._buf_mv)
 		self._clear_buffer()
 		self._last_tick = time.ticks_us()
