@@ -1,3 +1,9 @@
+# A note about this fork
+
+this is our (maple@maple.pet [et al](https://maple.pet/about)) testbed for M5Cardputer MicroPython development. none of this is meant to be used by anyone else and we're releasing it out of generosity. changes here may be pulled upstream and to other forks with the appropriate license notices and preferrably through git cherry-picking so commit ownership is preserved.
+
+we offer no warranty. you have been warned
+
 # Cardputer-MicroHydra
 MicroHydra is a simple MicroPython based app launcher designed for the M5Stack Cardputer.
 
