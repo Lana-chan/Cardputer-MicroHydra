@@ -162,7 +162,7 @@ class M5Sound:
 				bsmp |= (0b111111111111111 << 15-vol)
 			buf[i] += bsmp
 			for _ in range(permult): # add together frame periods for different octaves
-				ptr += per[perptr] << 1
+				ptr += per[perptr]
 				perptr += int(1)
 				if perptr >= perlen:
 					perptr = int(0)
