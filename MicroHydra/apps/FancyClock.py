@@ -1,10 +1,10 @@
-from lib import st7789py, keyboard
+from lib import st7789py, keyboard, battlevel
 from lib import microhydra as mh
 from launcher.icons import battery
 import time
 from font import vga2_16x32 as font
 from font import vga1_8x16 as font2
-from machine import SPI, Pin, PWM, reset, ADC
+from machine import SPI, Pin, PWM, reset
 import machine
 import random
 
@@ -13,7 +13,9 @@ min_bright = const(22000)
 bright_peak = const(65535)
 bright_step = const(500)
 
-#a simple clock program for the cardputer
+
+# v1.2
+# a simple clock program for the cardputer
 
 
 tft = st7789py.ST7789(
@@ -118,39 +120,22 @@ def get_random_colors():
 	sat1 = random.randint(0,255)
 	sat2 = random.randint(50,255)
 
-	
-	val1 = random.randint(245,255)
-	val2 = random.randint(10,20)
-	
-	
-	
-	#convert to color565
-	ui_color = st7789py.color565(hsv_to_rgb((hue1,sat1,val1)))
-	bg_color = st7789py.color565(hsv_to_rgb((hue2,sat2,val2)))
-	lighter_color = st7789py.color565(hsv_to_rgb((hue2,max(sat2 - 5, 0),val2 + 8)))
-	darker_color = st7789py.color565(hsv_to_rgb((hue2,min(sat2 + 60, 255),max(val2 - 4,0))))
-	
-	#get middle hue
-	mid_color = mh.mix_color565(bg_color, ui_color)
-	
-	return ui_color, bg_color, mid_color, lighter_color, darker_color
-	
-	
-	
-def read_battery_level(adc):
-	"""
-	read approx battery level on the adc and return as int range 0 (low) to 3 (high)
-	"""
-	raw_value = adc.read_uv() # vbat has a voltage divider of 1/2
-
-	if raw_value < 525000: # 1.05v
-		return 0
-	if raw_value < 1050000: # 2.1v
-		return 1
-	if raw_value < 1575000: # 3.15v
-		return 2
-	return 3 # 4.2v or higher
-
+    
+    val1 = random.randint(245,255)
+    val2 = random.randint(10,20)
+    
+    
+    
+    #convert to color565
+    ui_color = st7789py.color565(hsv_to_rgb((hue1,sat1,val1)))
+    bg_color = st7789py.color565(hsv_to_rgb((hue2,sat2,val2)))
+    lighter_color = st7789py.color565(hsv_to_rgb((hue2,max(sat2 - 5, 0),val2 + 8)))
+    darker_color = st7789py.color565(hsv_to_rgb((hue2,min(sat2 + 60, 255),max(val2 - 4,0))))
+    
+    #get middle hue
+    mid_color = mh.mix_color565(bg_color, ui_color)
+    
+    return ui_color, bg_color, mid_color, lighter_color, darker_color
 
 
 kb = keyboard.KeyBoard()
@@ -171,10 +156,8 @@ prev_pressed_keys = kb.get_pressed_keys()
 current_bright = bright_peak
 
 #init the ADC for the battery
-batt = ADC(10)
-batt.atten(ADC.ATTN_11DB)
-
-batt_level = read_battery_level(batt)
+batt = battlevel.Battery()
+batt_level = batt.read_level()
 
 
 
@@ -293,80 +276,80 @@ while True:
 	tft.hline(x_pos-2, y_pos-1, time_width + 20, lighter_color)
 	tft.hline(x_pos-2, y_pos+48, time_width + 20, darker_color)
 
-	
-	if moving_right:
-		x_pos += 1
-	else:
-		x_pos -= 1
-		
-	if moving_up:
-		y_pos -= 1
-	else:
-		y_pos +=1
-	
-	
-	#y_collision
-	if y_pos <= 1:
-		y_pos = 1
-		moving_up = False
-		ui_color, bg_color, mid_color, lighter_color, darker_color = get_random_colors()
-		red_color = mh.color565_shiftred(mid_color)
-		batt_level = read_battery_level(batt)
-		
-	elif y_pos >= 87:
-		y_pos = 87
-		moving_up = True
-		ui_color, bg_color, mid_color, lighter_color, darker_color = get_random_colors()
-		red_color = mh.color565_shiftred(mid_color)
-		batt_level = read_battery_level(batt)
-		
-		
-	#x_collision
-	if x_pos <= 0:
-		x_pos = 0
-		moving_right = True
-		ui_color, bg_color, mid_color, lighter_color, darker_color = get_random_colors()
-		red_color = mh.color565_shiftred(mid_color)
-		batt_level = read_battery_level(batt)
-		
-	elif x_pos >= 224 - time_width:
-		x_pos = 224 - time_width
-		moving_right = False
-		ui_color, bg_color, mid_color, lighter_color, darker_color = get_random_colors()
-		red_color = mh.color565_shiftred(mid_color)
-		batt_level = read_battery_level(batt)
-	
-	
-	
-	
-	#refresh bg on 5 mins
-	if minute != old_minute and minute % 5 == 0:
-		old_minute = minute
-		tft.fill(0)
-		
-	#keystrokes and backlight
-	pressed_keys = kb.get_pressed_keys()
-	if pressed_keys != prev_pressed_keys: # some button has been pressed
-		if "GO" in pressed_keys:
-			tft.fill(0)
-			tft.sleep_mode(True)
-			blight.duty_u16(0)
-			reset()
-		current_bright = bright_peak
-	elif current_bright != min_bright:
-		current_bright -= bright_step
-		if current_bright < min_bright:
-			current_bright = min_bright
-		blight.duty_u16(min(max_bright,current_bright))
-		
-		
-	prev_pressed_keys = pressed_keys
-	
-	if "SPC" in pressed_keys:
-		current_bright = bright_peak
-		time.sleep_ms(1)
-	else:
-		time.sleep_ms(70)
+    
+    if moving_right:
+        x_pos += 1
+    else:
+        x_pos -= 1
+        
+    if moving_up:
+        y_pos -= 1
+    else:
+        y_pos +=1
+    
+    
+    #y_collision
+    if y_pos <= 1:
+        y_pos = 1
+        moving_up = False
+        ui_color, bg_color, mid_color, lighter_color, darker_color = get_random_colors()
+        red_color = mh.color565_shiftred(mid_color)
+        batt_level = batt.read_level()
+        
+    elif y_pos >= 87:
+        y_pos = 87
+        moving_up = True
+        ui_color, bg_color, mid_color, lighter_color, darker_color = get_random_colors()
+        red_color = mh.color565_shiftred(mid_color)
+        batt_level = batt.read_level()
+        
+        
+    #x_collision
+    if x_pos <= 0:
+        x_pos = 0
+        moving_right = True
+        ui_color, bg_color, mid_color, lighter_color, darker_color = get_random_colors()
+        red_color = mh.color565_shiftred(mid_color)
+        batt_level = batt.read_level()
+        
+    elif x_pos >= 224 - time_width:
+        x_pos = 224 - time_width
+        moving_right = False
+        ui_color, bg_color, mid_color, lighter_color, darker_color = get_random_colors()
+        red_color = mh.color565_shiftred(mid_color)
+        batt_level = batt.read_level()
+    
+    
+    
+    
+    #refresh bg on 5 mins
+    if minute != old_minute and minute % 5 == 0:
+        old_minute = minute
+        tft.fill(0)
+        
+    #keystrokes and backlight
+    pressed_keys = kb.get_pressed_keys()
+    if pressed_keys != prev_pressed_keys: # some button has been pressed
+        if "GO" in pressed_keys:
+            tft.fill(0)
+            tft.sleep_mode(True)
+            blight.duty_u16(0)
+            reset()
+        current_bright = bright_peak
+    elif current_bright != min_bright:
+        current_bright -= bright_step
+        if current_bright < min_bright:
+            current_bright = min_bright
+        blight.duty_u16(min(max_bright,current_bright))
+        
+        
+    prev_pressed_keys = pressed_keys
+    
+    if "SPC" in pressed_keys:
+        current_bright = bright_peak
+        time.sleep_ms(1)
+    else:
+        time.sleep_ms(70)
 
 
 

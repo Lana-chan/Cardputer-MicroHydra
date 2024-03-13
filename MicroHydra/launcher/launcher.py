@@ -12,29 +12,25 @@ from font import vga1_8x16 as fontsmall
 from font import vga2_16x32 as font
 from machine import Pin, SDCard, SPI, ADC, RTC, reset
 import time, os, json, math, ntptime
-from lib import keyboard
+from lib import keyboard, beeper, battlevel
 from lib import microhydra as mh
+from lib.mhconfig import Config
 gc.collect()
 from lib import st7789py as st7789
 from launcher.icons import icons, battery
 
 
-
-
 """
 
-VERSION: 0.7
+VERSION: 0.8
 
 CHANGES:
-	Adjusted battery level detection, improved launcher sort method,
-	added apps folders to import path,
-	added ability to jump to alphabetical location in apps list,
-	added new fbuf-based display driver to lib
-
-This program is designed to be used in conjunction with the "apploader.py" program, to select and launch MPy apps for the Cardputer.
+	Created mhconfig.Config, mhoverlay.UI_Overlay, cleaned up launcher.py, endured the horrors
+	Renamed constants to make them "real" constants, and added slight improvements to st7789fbuf.py
+	
+This program is designed to be used in conjunction with "main.py" apploader, to select and launch MPy apps.
 
 The basic app loading logic works like this:
-
  - apploader reads reset cause and RTC.memory to determine which app to launch
  - apploader launches 'launcher.py' when hard reset, or when RTC.memory is blank
  - launcher scans app directories on flash and SDCard to find apps
@@ -45,54 +41,43 @@ The basic app loading logic works like this:
  - app at given path now has control of device.
  - pressing the reset button will relaunch the launcher program, and so will calling machine.reset() from the app. 
 
-
-
 This approach was chosen to reduce the chance of conflicts or memory errors when switching apps.
-Because MicroPython completely resets between apps, the only "wasted" ram from the app switching process will be from launcher.py
-
-
+Because MicroPython completely resets between apps, the only "wasted" ram from the app switching process will be from main.py
 
 """
 
-
-
+#init beeper asap to help prevent volume bug
+beep = beeper.Beeper()
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Constants: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-black = const(0)
-white = const(65535)
-default_ui_color = const(53243)
-default_bg_color = const(4421)
-default_ui_sound = const(True)
-default_volume = const(2)
+_TARGET_VSCSAD = const(40) # scrolling display "center"
 
-appname_y = const(80) 
-target_vscsad = const(40) # scrolling display "center"
+_DISPLAY_WIDTH = const(240)
+_DISPLAY_WIDTH_HALF = const(120)
+_DISPLAY_HEIGHT = const(135)
+_DISPLAY_OFFBOUND = const(40)
 
-display_width = const(240)
-display_width_half = const(120)
-display_height = const(135)
-display_offbound = const(40)
+_MAX_WIFI_ATTEMPTS = const(1000)
+_MAX_NTP_ATTEMPTS = const(10)
 
-max_wifi_attemps = const(1000)
-max_ntp_attemps = const(10)
+_WIDGET_BATTERY_X = const(212)
+_WIDGET_BATTERY_Y = const(4)
+_WIDGET_BATTERY_W = const(20)
+_WIDGET_BATTERY_H = const(10)
+_WIDGET_SCROLL_Y = const(133)
+_WIDGET_SCROLL_H = const(2)
+_WIDGET_CLOCK_X = const(6)
+_WIDGET_CLOCK_Y = const(2)
+_WIDGET_CLOCK_W = const(58)
+_WIDGET_CLOCK_H = const(16)
 
-widget_battery_x = const(212)
-widget_battery_y = const(4)
-widget_battery_w = const(20)
-widget_battery_h = const(10)
-widget_scroll_y = const(133)
-widget_scroll_h = const(2)
-widget_clock_x = const(6)
-widget_clock_y = const(2)
-widget_clock_w = const(58)
-widget_clock_h = const(16)
-
-ui_status_height = const(18)
-ui_icon_x = const(104)
-ui_icon_y = const(36)
-ui_app_height = const(32 + 34 + 10)
-ui_app_clear_w = const(200)
-ui_app_clear_x = const(20)#display_width_half - ui_app_clear_w / 2
+_UI_STATUS_H = const(18)
+_UI_ICON_X = const(104)
+_UI_ICON_Y = const(36)
+_UI_APP_H = const(32 + 34 + 10)
+_UI_APP_CLEAR_W = const(200)
+_UI_APP_CLEAR_X = const(20)#display_width_half - _UI_APP_CLEAR_W / 2
+_UI_APPNAME_Y = const(80)
 
 special_apps = {
 	"ui_sound": "UI Sound",
@@ -107,22 +92,9 @@ toggle_labels = [
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Globals: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-config = {
-	"ui_color": default_ui_color,
-	"bg_color": default_bg_color,
-	"ui_sound": default_ui_sound,
-	"volume": default_volume,
-	"wifi_ssid": '',
-	"wifi_pass": '',
-	"sync_clock": True,
-	"timezone": 0
-}
+config = None
 
-mid_color = mh.mix_color565(config["bg_color"], config["ui_color"])
-red_color = mh.color565_shiftred(config["ui_color"])
-green_color = mh.color565_shiftgreen(config["ui_color"], 0.4)
-
-widget_scroll_w = display_width
+widget_scroll_w = _DISPLAY_WIDTH
 
 battery_widget = []
 
@@ -245,7 +217,7 @@ def scan_apps(sd):
 	app_names.append(special_apps["settings"])
 	app_paths[special_apps["settings"]] = "/launcher/settings.py"
 	
-	widget_scroll_w = display_width // len(app_names)
+	widget_scroll_w = _DISPLAY_WIDTH // len(app_names)
 	
 	return app_names, app_paths, sd
 
@@ -271,15 +243,15 @@ def center_text_x(text, char_width = 16):
 	"""
 	str_width = len(text) * char_width
 	# display is 240 px wide
-	start_coord = display_width_half - (str_width // 2)
+	start_coord = _DISPLAY_WIDTH_HALF - (str_width // 2)
 	
 	return start_coord, str_width
 
 
-def easeInCubic(x):
+def ease_in_cubic(x):
 	return x * x * x
 
-def easeOutCubic(x):
+def ease_out_cubic(x):
 	return 1 - ((1 - x) ** 3)
 		
 		
@@ -297,59 +269,37 @@ def time_24_to_12(hour_24,minute):
 	return time_string, ampm
 
 
-def read_battery_level(adc):
-	"""
-	read approx battery level on the adc and return as int range 0 (low) to 3 (high)
-	"""
-	raw_value = adc.read_uv() # vbat has a voltage divider of 1/2
-	
-	# more real-world data is needed to dial in battery level.
-	# the original values were low, so they will be adjusted based on feedback.
-	
-	#originally 525000 (1.05v)
-	if raw_value < 1575000: #3.15v
-		return 0
-	#originally 1050000 (2.1v)
-	if raw_value < 1750000: #3.5v
-		return 1
-	#originally 1575000 (3.15v)
-	if raw_value < 1925000: #3.85v
-		return 2
-	# 2100000 (4.2v)
-	return 3 # 4.2v or higher
-
-
 def erase_widgets():
-	tft.fill_rect(0, widget_scroll_y, display_width, widget_scroll_h, config["bg_color"]) # erase scrollbar
-	#tft.fill_rect(widget_clock_x + offset, widget_clock_y, widget_clock_w, widget_clock_h, mid_color) # erase clock
-	#tft.fill_rect(widget_battery_x + offset, widget_battery_y, widget_battery_w, widget_battery_h, mid_color) # erase battery
-	tft.fill_rect(0, 0, display_width, ui_status_height, mid_color)
+	tft.fill_rect(0, _WIDGET_SCROLL_Y, _DISPLAY_WIDTH, _WIDGET_SCROLL_H, config["bg_color"]) # erase scrollbar
+	#tft.fill_rect(_WIDGET_CLOCK_X + offset, _WIDGET_CLOCK_Y, _WIDGET_CLOCK_W, _WIDGET_CLOCK_H, config.palette[2]) # erase clock
+	#tft.fill_rect(_WIDGET_BATTERY_X + offset, _WIDGET_BATTERY_Y, _WIDGET_BATTERY_W, _WIDGET_BATTERY_H, config.palette[2]) # erase battery
+	tft.fill_rect(0, 0, _DISPLAY_WIDTH, _UI_STATUS_H, config.palette[2])
 
 def draw_widgets(offset, app_selector_index, battlevel):
 	#scroll bar
-	tft.fill_rect((widget_scroll_w * app_selector_index) + offset, 133, widget_scroll_w, widget_scroll_h, mid_color)
+	tft.fill_rect((widget_scroll_w * app_selector_index) + offset, 133, widget_scroll_w, _WIDGET_SCROLL_H, config.palette[2])
 	
 	#clock
 	_,_,_, hour_24, minute, _,_,_ = time.localtime()
 	formatted_time, ampm = time_24_to_12(hour_24, minute)
-	tft.text(fontsmall, formatted_time, widget_clock_x + offset, widget_clock_y, config["ui_color"], mid_color)
-	tft.text(fontsmall, ampm, widget_clock_x + 2 + (len(formatted_time) * 8) + offset, widget_clock_y, config["bg_color"], mid_color)
+	tft.text(fontsmall, formatted_time, _WIDGET_CLOCK_X + offset, _WIDGET_CLOCK_Y, config["ui_color"], config.palette[2])
+	tft.text(fontsmall, ampm, _WIDGET_CLOCK_X + 2 + (len(formatted_time) * 8) + offset, _WIDGET_CLOCK_Y, config["bg_color"], config.palette[2])
 	
 	#battery
-	tft.bitmap_icons(battery, battery_widget[battlevel]["icon"], (mid_color,battery_widget[battlevel]["color"]), widget_battery_x + offset, widget_battery_y)
+	tft.bitmap_icons(battery, battery_widget[battlevel]["icon"], (config.palette[2],battery_widget[battlevel]["color"]), _WIDGET_BATTERY_X + offset, _WIDGET_BATTERY_Y)
 
 def play_sound(notes, time_ms):
 	if config["ui_sound"]:
 		beep.play(notes, time_ms, config["volume"])
 
 def draw_app(offset, text, icon, label=None):
-	tft.fill_rect(ui_app_clear_x + offset, ui_icon_y, ui_app_clear_w, ui_app_height, config["bg_color"])
+	tft.fill_rect(_UI_APP_CLEAR_X + offset, _UI_ICON_Y, _UI_APP_CLEAR_W, _UI_APP_H, config["bg_color"])
 
-	tft.text(font, text, center_text_x(text)[0] + offset, appname_y, config["ui_color"], config["bg_color"])
+	tft.text(font, text, center_text_x(text)[0] + offset, _UI_APPNAME_Y, config["ui_color"], config["bg_color"])
 	if label:
-		tft.text(font, label, center_text_x(label)[0] + offset, ui_icon_y, config["ui_color"], config["bg_color"])
+		tft.text(font, label, center_text_x(label)[0] + offset, _UI_ICON_Y, config["ui_color"], config["bg_color"])
 	else:
-		tft.bitmap_icons(icons, icon, (config["bg_color"], config["ui_color"]), ui_icon_x + offset, ui_icon_y)
+		tft.bitmap_icons(icons, icon, (config["bg_color"], config["ui_color"]), _UI_ICON_X + offset, _UI_ICON_Y)
 
 #--------------------------------------------------------------------------------------------------
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -362,7 +312,6 @@ def draw_app(offset, text, icon, label=None):
 
 def main_loop():
 	global config
-	global mid_color, red_color, green_color
 	global widget_scroll_w
 	global battery_widget
 	global tft, beep, nic
@@ -372,26 +321,13 @@ def main_loop():
 	
 	
 	# load our config asap to support other processes
-	config_modified = False
-	#load config
-	try:
-		with open("config.json", "r") as conf:
-			config_overlay = json.loads(conf.read())
-			for key in config_overlay:
-				config[key] = config_overlay[key]
-	except:
-		print("could not load settings from config.json. reloading default values.")
-		config_modified = True
-		with open("config.json", "w") as conf:
-			conf.write(json.dumps(config))
-	mid_color = mh.mix_color565(config["bg_color"], config["ui_color"])
-	red_color = mh.color565_shiftred(config["ui_color"])
-	green_color = mh.color565_shiftgreen(config["ui_color"], 0.4)
+	config = Config()
+
 	battery_widget = [
-		{"icon": battery.EMPTY, "color": red_color},
+		{"icon": battery.EMPTY, "color": config.rgb_colors[0]},
 		{"icon": battery.LOW, "color": config["ui_color"]},
 		{"icon": battery.HIGH, "color": config["ui_color"]},
-		{"icon": battery.FULL, "color": green_color}
+		{"icon": battery.FULL, "color": config.rgb_colors[1]}
 	]
 		
 	# sync our RTC on boot, if set in settings
@@ -439,15 +375,14 @@ def main_loop():
 	prev_pressed_keys = []
 	
 	#init the ADC for the battery
-	batt = ADC(10)
-	batt.atten(ADC.ATTN_11DB)
+	batt = battlevel.Battery()
 	
 	#init driver for the graphics
 	spi = SPI(1, baudrate=40000000, sck=Pin(36), mosi=Pin(35), miso=None)
 	tft = st7789.ST7789(
 		spi,
-		display_height,
-		display_width,
+		_DISPLAY_HEIGHT,
+		_DISPLAY_WIDTH,
 		reset=Pin(33, Pin.OUT),
 		cs=Pin(37, Pin.OUT),
 		dc=Pin(34, Pin.OUT),
@@ -455,8 +390,8 @@ def main_loop():
 		rotation=1,
 		color_order=st7789.BGR)
 	
-	tft.vscrdef(display_offbound, display_width, display_offbound)
-	tft.vscsad(target_vscsad)
+	tft.vscrdef(_DISPLAY_OFFBOUND, _DISPLAY_WIDTH, _DISPLAY_OFFBOUND)
+	tft.vscsad(_TARGET_VSCSAD)
 	
 	nonscroll_elements_displayed = False
 	
@@ -466,8 +401,8 @@ def main_loop():
 	delayed_redraw = False
 	
 	launching = False
-	current_vscsad = target_vscsad
-	prev_vscsad = target_vscsad
+	current_vscsad = _TARGET_VSCSAD
+	prev_vscsad = _TARGET_VSCSAD
 	
 	scroll_direction = 0 #1 for right, -1 for left, 0 for center
 	refresh_timer = 0
@@ -481,29 +416,29 @@ def main_loop():
 		
 		
 	#init diplsay
-	tft.fill_rect(-display_offbound, 0, display_width + display_offbound, display_height, config["bg_color"])
-	tft.fill_rect(-display_offbound, 0, display_width + display_offbound, ui_status_height, mid_color)
-	
+	tft.fill_rect(-_DISPLAY_OFFBOUND, 0, _DISPLAY_WIDTH + _DISPLAY_OFFBOUND, _DISPLAY_HEIGHT, config["bg_color"])
+	tft.fill_rect(-_DISPLAY_OFFBOUND, 0, _DISPLAY_WIDTH + _DISPLAY_OFFBOUND, _UI_STATUS_H, config.palette[2])
+	tft.hline(-_DISPLAY_OFFBOUND, _UI_STATUS_H, _DISPLAY_WIDTH + _DISPLAY_OFFBOUND, config.palette[0])
 	
 	while True:
 		
 		
 		# ----------------------- check for key presses on the keyboard. Only if they weren't already pressed. --------------------------
-		pressed_keys = kb.get_pressed_keys()
-		if pressed_keys != prev_pressed_keys:
+		new_keys = kb.get_new_keys()
+		if new_keys:
 			
 			# ~~~~~~ check if the arrow keys are newly pressed ~~~~~
-			if "/" in pressed_keys and "/" not in prev_pressed_keys: # right arrow
+			if "/" in new_keys: # right arrow
 				app_selector_index += 1
 				
 				#animation:
 
 				scroll_direction = 1
-				current_vscsad = target_vscsad
+				current_vscsad = _TARGET_VSCSAD
 				play_sound((("C5","D4"),"A4"), 80)
 
 				
-			elif "," in pressed_keys and "," not in prev_pressed_keys: # left arrow
+			elif "," in new_keys: # left arrow
 				app_selector_index -= 1
 				
 				#animation:
@@ -511,14 +446,14 @@ def main_loop():
 				scroll_direction = -1
 				
 				#this prevents multiple scrolls from messing up the animation
-				current_vscsad = target_vscsad
+				current_vscsad = _TARGET_VSCSAD
 				
 				play_sound((("B3","C5"),"A4"), 80)
 				
 			
 		
 			# ~~~~~~~~~~ check if GO or ENTER are pressed ~~~~~~~~~~
-			if "GO" in pressed_keys or "ENT" in pressed_keys:
+			if "GO" in new_keys:
 				
 				# special "settings" app options will have their own behaviour, otherwise launch the app
 				if app_names[app_selector_index] == special_apps["ui_sound"]:
@@ -536,18 +471,16 @@ def main_loop():
 				elif app_names[app_selector_index] == special_apps["reload_apps"]:
 					app_names, app_paths, sd = scan_apps(sd)
 					app_selector_index = 0
-					current_vscsad = target_vscsad + 2 # forces scroll animation triggers
+					current_vscsad = _TARGET_VSCSAD + 2 # forces scroll animation triggers
 					play_sound(('F3','A3','C3'),100)
 						
 				else: # ~~~~~~~~~~~~~~~~~~~ LAUNCH THE APP! ~~~~~~~~~~~~~~~~~~~~
 					
 					#save config if it has been changed:
-					if config_modified:
-						with open("config.json", "w") as conf:
-							conf.write(json.dumps(config))
+					config.save()
 						
 					# shut off the display
-					tft.fill(black)
+					tft.fill(st7789.BLACK)
 					tft.sleep_mode(True)
 					Pin(38, Pin.OUT).value(0) #backlight off
 					spi.deinit()
@@ -563,9 +496,9 @@ def main_loop():
 					launch_app(app_paths[app_names[app_selector_index]])
 
 			else: # keyboard shortcuts!
-				for key in pressed_keys:
+				for key in new_keys:
 					# jump to letter:
-					if key not in prev_pressed_keys and len(key) == 1: # filter special keys and repeated presses
+					if len(key) == 1: # filter special keys
 						if key in 'abcdefghijklmnopqrstuvwxyz1234567890':
 							#search for that letter in the app list
 							for idx, name in enumerate(app_names):
@@ -575,19 +508,14 @@ def main_loop():
 										scroll_direction = -1
 									elif app_selector_index < idx:
 										scroll_direction = 1
-									current_vscsad = target_vscsad
+									current_vscsad = _TARGET_VSCSAD
 									# go there!
 									app_selector_index = idx
 									play_sound(("G3"), 100)
 									found_key = True
 									break
 				
-			# once we parse the keypresses for this loop, we need to store them for next loop
-			prev_pressed_keys = pressed_keys
-		
-		
-		
-		
+	
 		#wrap around our selector index, in case we go over or under the target amount
 		app_selector_index = app_selector_index % len(app_names)
 	
@@ -606,22 +534,22 @@ def main_loop():
 		
 		prev_app_text = app_names[prev_selector_index]
 		current_app_text = app_names[app_selector_index]
-		battlevel = read_battery_level(batt)
+		battlevel = batt.read_level()
 				
 		# if scrolling animation, move in the direction specified!
 		if scroll_direction != 0:
 			#erase_widgets()
-			#draw_widgets(current_vscsad - target_vscsad, app_selector_index, battlevel)
-			tft.vscsad(current_vscsad % display_width)
-			#draw_app(current_vscsad - target_vscsad, current_app_text, icon, label)
+			#draw_widgets(current_vscsad - _TARGET_VSCSAD, app_selector_index, battlevel)
+			tft.vscsad(current_vscsad % _DISPLAY_WIDTH)
+			#draw_app(current_vscsad - _TARGET_VSCSAD, current_app_text, icon, label)
 			if scroll_direction == 1:
-				current_vscsad += math.floor(easeOutCubic((current_vscsad - target_vscsad) / display_width_half) * 20) + 5
+				current_vscsad += math.floor(ease_out_cubic((current_vscsad - _TARGET_VSCSAD) / _DISPLAY_WIDTH_HALF) * 20) + 5
 				if current_vscsad >= 160:
 					current_vscsad = -80
 					scroll_direction = 0
 					force_redraw_display = True
 			else:
-				current_vscsad -= math.floor(easeOutCubic((current_vscsad - target_vscsad) / -display_width_half) * 20) + 5
+				current_vscsad -= math.floor(ease_out_cubic((current_vscsad - _TARGET_VSCSAD) / -_DISPLAY_WIDTH_HALF) * 20) + 5
 				if current_vscsad <= -80:
 					current_vscsad = 160
 					scroll_direction = 0
@@ -629,24 +557,24 @@ def main_loop():
 
 				
 		# if vscsad/scrolling is not centered, move it toward center!
-		if scroll_direction == 0 and current_vscsad != target_vscsad:
+		if scroll_direction == 0 and current_vscsad != _TARGET_VSCSAD:
 			#erase_widgets()
-			#draw_widgets(current_vscsad - target_vscsad, app_selector_index, battlevel)
-			tft.vscsad(current_vscsad % display_width)
-			#draw_app(current_vscsad - target_vscsad, current_app_text, icon, label)
-			if current_vscsad < target_vscsad:
-				current_vscsad += (abs(current_vscsad - target_vscsad) // 8) + 1
-			elif current_vscsad > target_vscsad:
-				current_vscsad -= (abs(current_vscsad - target_vscsad) // 8) + 1
+			#draw_widgets(current_vscsad - _TARGET_VSCSAD, app_selector_index, battlevel)
+			tft.vscsad(current_vscsad % _DISPLAY_WIDTH)
+			#draw_app(current_vscsad - _TARGET_VSCSAD, current_app_text, icon, label)
+			if current_vscsad < _TARGET_VSCSAD:
+				current_vscsad += (abs(current_vscsad - _TARGET_VSCSAD) // 8) + 1
+			elif current_vscsad > _TARGET_VSCSAD:
+				current_vscsad -= (abs(current_vscsad - _TARGET_VSCSAD) // 8) + 1
 
 		
 		# if we are scrolling, we should change some UI elements until we finish
-		if nonscroll_elements_displayed and (current_vscsad != target_vscsad):
+		if nonscroll_elements_displayed and (current_vscsad != _TARGET_VSCSAD):
 			erase_widgets()
 			nonscroll_elements_displayed = False
 			
 			
-		elif nonscroll_elements_displayed == False and (current_vscsad == target_vscsad):
+		elif nonscroll_elements_displayed == False and (current_vscsad == _TARGET_VSCSAD):
 		#	battlevel = read_battery_level(batt)
 			draw_widgets(0, app_selector_index, battlevel)
 			nonscroll_elements_displayed = True
@@ -718,13 +646,13 @@ def main_loop():
 					rtc.datetime(tuple(time_list))
 					print(f'RTC successfully synced to {rtc.datetime()} with {sync_ntp_attemps} attemps.')
 					
-				elif sync_ntp_attemps >= max_ntp_attemps:
+				elif sync_ntp_attemps >= _MAX_NTP_ATTEMPTS:
 					nic.disconnect()
 					nic.active(False) #shut off wifi
 					syncing_clock = False
 					print(f"Syncing RTC aborted after {sync_ntp_attemps} attemps")
 				
-			elif connect_wifi_attemps >= max_wifi_attemps:
+			elif connect_wifi_attemps >= _MAX_WIFI_ATTEMPTS:
 				nic.disconnect()
 				nic.active(False) #shut off wifi
 				syncing_clock = False
