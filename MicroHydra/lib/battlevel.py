@@ -1,4 +1,4 @@
-import machine
+from machine import ADC
 
 
 
@@ -16,8 +16,8 @@ _HIGH_THRESH = const(_LOW_THRESH + ((_MAX_VALUE - _MIN_VALUE) // 3))
 class Battery:
     def __init__(self):
         #init the ADC for the battery
-        self.adc = machine.ADC(10)
-        self.adc.atten(machine.ADC.ATTN_11DB) # needed to get apropriate range
+        self.adc = ADC(10)
+        self.adc.atten(ADC.ATTN_11DB) # needed to get apropriate range
         
     def read_pct(self):
         """
