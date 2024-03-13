@@ -453,7 +453,7 @@ def main_loop():
 			
 		
 			# ~~~~~~~~~~ check if GO or ENTER are pressed ~~~~~~~~~~
-			if "GO" in new_keys:
+			if "GO" in new_keys or "ENT" in new_keys:
 				
 				# special "settings" app options will have their own behaviour, otherwise launch the app
 				if app_names[app_selector_index] == special_apps["ui_sound"]:
@@ -534,7 +534,7 @@ def main_loop():
 		
 		prev_app_text = app_names[prev_selector_index]
 		current_app_text = app_names[app_selector_index]
-		battlevel = batt.read_level()
+		battery_level = batt.read_level()
 				
 		# if scrolling animation, move in the direction specified!
 		if scroll_direction != 0:
@@ -576,7 +576,7 @@ def main_loop():
 			
 		elif nonscroll_elements_displayed == False and (current_vscsad == _TARGET_VSCSAD):
 		#	battlevel = read_battery_level(batt)
-			draw_widgets(0, app_selector_index, battlevel)
+			draw_widgets(0, app_selector_index, battery_level)
 			nonscroll_elements_displayed = True
 			
 		

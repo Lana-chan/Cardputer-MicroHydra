@@ -17,7 +17,7 @@ tft = st7789.ST7789(
 	backlight=Pin(38, Pin.OUT),
 	rotation=1,
 	color_order=st7789.BGR,
-	fbuf = fbuf
+	reserved_bytearray = fbuf
 )
 
 import network
