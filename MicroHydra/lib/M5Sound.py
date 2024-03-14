@@ -64,7 +64,6 @@ class Sample():
 				buffer_size = self.length
 			self.buffer = bytearray(buffer_size)
 			self.buf_mv = memoryview(self.buffer)
-			print(source, self.length)
 			self.file = open(source, "rb")
 			self.start = 0
 			self.end = self.file.readinto(self.buf_mv)
@@ -286,8 +285,6 @@ class M5Sound:
 
 				if registers.sample:
 					self._fill_buffer(registers, end)
-					#if self._fill_buffer(registers, end) == False:
-					#	registers.sample = None
 			
 			for reg in self._queues[ch]:
 				if reg.buf_start >= self._buf_size:
