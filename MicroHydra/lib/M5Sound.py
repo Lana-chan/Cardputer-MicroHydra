@@ -127,11 +127,6 @@ class Register:
 		registers.volume = self.volume
 		return registers
 	
-	def prepare(self):
-		if self.samplehandler:
-			self.samplehandler.setup(self.pointer)
-			pass
-	
 	def __str__(self):
 		return f"{self.buf_start}: {self.sample} v:{self.volume} n:{self.note}"
 
