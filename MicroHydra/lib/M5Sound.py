@@ -280,7 +280,10 @@ class M5Sound:
 
 				if registers.sample:
 					self._fill_buffer(registers, end)
-			
+
+		for ch in range(int(self.channels)):
+			if self._registers[ch].sample:
+				self._registers[ch].sample.load(self._registers[ch].pointer<<1)
 			for reg in self._queues[ch]:
 				if reg.buf_start >= self._buf_size:
 					reg.buf_start -= self._buf_size
