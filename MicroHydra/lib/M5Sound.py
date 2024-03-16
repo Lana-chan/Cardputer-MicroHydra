@@ -256,7 +256,14 @@ class M5Sound:
 				bsmp = (bsmp & 0b1000000000000000) | ((bsmp & 0b0111111111111111) >> vol)
 				if (bsmp & 0b1000000000000000) != 0:
 					bsmp |= (0b111111111111111 << 15-vol)
-			buf[i] += bsmp
+			if (bsmp & 0b1000000000000000) and (buf[i] & 0b1000000000000000) and not ((buf[i] + bsmp) & 0b1000000000000000):
+				# negative overflow
+				buf[i] = 0b1111111111111111
+			elif not (bsmp & 0b1000000000000000) and not (buf[i] & 0b1000000000000000) and ((buf[i] + bsmp) & 0b1000000000000000):
+				# positive overflow
+				buf[i] = 0b0111111111111111
+			else:
+				buf[i] += bsmp
 			for _ in range(permult): # add together frame periods for different octaves
 				ptr += per[perptr]
 				perptr += int(1)
