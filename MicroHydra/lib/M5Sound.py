@@ -37,10 +37,14 @@ _PERIODS = [ # c-0 thru b-0 - how much to advance a sample pointer per frame for
 	b'\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00'
 ]
 
-@micropython.native
-def _volume(volume):
-	"""Returns volume 0-15 reversed in order to be used in bitshifting."""
-	return 15 - (0 if volume < 0 else 15 if volume > 15 else volume)
+@micropython.viper
+def _volume(volume:int) -> int:
+	"""Returns volume 0-30 reversed in order to be used in bitshifting. 15 is 100% (no bitshift)"""
+	if volume <= 0:
+		return 15
+	if volume <= 30:
+		return 15 - volume
+	return -15
 
 @micropython.viper
 def _vipmod(a:int, b:int) -> int:
@@ -246,9 +250,12 @@ class M5Sound:
 				sbend = int(registers.sample.end)>>1
 			bsmp = int(smp[ptr-sbstart])
 			# ladies and gentlemen, the two's complement
-			bsmp = (bsmp & 0b1000000000000000) | ((bsmp & 0b0111111111111111) >> vol)
-			if (bsmp & 0b1000000000000000) != 0:
-				bsmp |= (0b111111111111111 << 15-vol)
+			if vol < 0:
+				bsmp = bsmp = (bsmp & 0b1000000000000000) | (((bsmp & 0b0111111111111111) << int(abs(vol))) & 0b0111111111111111)
+			else:
+				bsmp = (bsmp & 0b1000000000000000) | ((bsmp & 0b0111111111111111) >> vol)
+				if (bsmp & 0b1000000000000000) != 0:
+					bsmp |= (0b111111111111111 << 15-vol)
 			buf[i] += bsmp
 			for _ in range(permult): # add together frame periods for different octaves
 				ptr += per[perptr]
