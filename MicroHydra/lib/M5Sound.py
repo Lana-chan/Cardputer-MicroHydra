@@ -37,6 +37,9 @@ _PERIODS = [ # c-0 thru b-0 - how much to advance a sample pointer per frame for
 	b'\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00'
 ]
 
+_INT_MINVAL = const(-32768)
+_INT_MAXVAL = const(32767)
+
 @micropython.viper
 def _volume(volume:int) -> int:
 	"""Returns volume 0-30 reversed in order to be used in bitshifting. 15 is 100% (no bitshift)"""
@@ -52,18 +55,6 @@ def _vipmod(a:int, b:int) -> int:
 	while a >= b:
 		a -= b
 	return a
-
-_INT_MINVAL = const(-32768)
-_INT_MAXVAL = const(32767)
-@micropython.native
-def _16bit_clamp_add(a, b):
-	a = -(~a & 0b0111111111111111) - 1 if a & 0b1000000000000000 else (a & 0b0111111111111111)
-	b = -(~b & 0b0111111111111111) - 1 if b & 0b1000000000000000 else (b & 0b0111111111111111)
-	res = a+b
-	res = (_INT_MINVAL if res < _INT_MINVAL else _INT_MAXVAL if res > _INT_MAXVAL else res)
-	if res < 0:
-		return res & 0b0111111111111111 | 0b1000000000000000
-	return res & 0b0111111111111111
 
 # streaming samples from sd card without using much ram oh yeah i'm feeling really clever!!
 class Sample():
@@ -268,7 +259,14 @@ class M5Sound:
 				bsmp = (bsmp & 0b1000000000000000) | ((bsmp & 0b0111111111111111) >> vol)
 				if (bsmp & 0b1000000000000000) != 0:
 					bsmp |= (0b111111111111111 << 15-vol)
-			buf[i] = int(_16bit_clamp_add(buf[i], bsmp))
+			bsmp_int = 0 - (0b10000000000000000 - int(bsmp & 0b1111111111111111)) if bsmp & 0b1000000000000000 else bsmp
+			buf_int = 0 - (0b10000000000000000 - int(buf[i] & 0b1111111111111111)) if buf[i] & 0b1000000000000000 else buf[i]
+			res = bsmp_int + buf_int
+			res = (_INT_MINVAL if res < _INT_MINVAL else _INT_MAXVAL if res > _INT_MAXVAL else res)
+			if res < 0:
+				buf[i] = (res & 0b0111111111111111) | 0b1000000000000000
+			else:
+				buf[i] = res & 0b0111111111111111
 			for _ in range(permult): # add together frame periods for different octaves
 				ptr += per[perptr]
 				perptr += int(1)
