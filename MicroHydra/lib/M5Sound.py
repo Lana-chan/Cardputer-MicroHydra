@@ -252,21 +252,16 @@ class M5Sound:
 				sbstart = int(registers.sample.start)>>1
 				sbend = int(registers.sample.end)>>1
 			bsmp = int(smp[ptr-sbstart])
-			# ladies and gentlemen, the two's complement
+			bsmp_int = 0 - (0b10000000000000000 - int(smp[ptr-sbstart])) if bsmp & 0b1000000000000000 else bsmp
+			buf_int = 0 - (0b10000000000000000 - int(buf[i])) if buf[i] & 0b1000000000000000 else buf[i]
 			if vol < 0:
-				bsmp = bsmp = (bsmp & 0b1000000000000000) | (((bsmp & 0b0111111111111111) << int(abs(vol))) & 0b0111111111111111)
+				bsmp_int <<= (0-vol)
 			else:
-				bsmp = (bsmp & 0b1000000000000000) | ((bsmp & 0b0111111111111111) >> vol)
-				if (bsmp & 0b1000000000000000) != 0:
-					bsmp |= (0b111111111111111 << 15-vol)
-			bsmp_int = 0 - (0b10000000000000000 - int(bsmp & 0b1111111111111111)) if bsmp & 0b1000000000000000 else bsmp
-			buf_int = 0 - (0b10000000000000000 - int(buf[i] & 0b1111111111111111)) if buf[i] & 0b1000000000000000 else buf[i]
+				bsmp_int >>= vol
 			res = bsmp_int + buf_int
-			res = (_INT_MINVAL if res < _INT_MINVAL else _INT_MAXVAL if res > _INT_MAXVAL else res)
+			buf[i] = (_INT_MINVAL if res < _INT_MINVAL else _INT_MAXVAL if res > _INT_MAXVAL else res)
 			if res < 0:
-				buf[i] = (res & 0b0111111111111111) | 0b1000000000000000
-			else:
-				buf[i] = res & 0b0111111111111111
+				buf[i] |= 0b1000000000000000
 			for _ in range(permult): # add together frame periods for different octaves
 				ptr += per[perptr]
 				perptr += int(1)
