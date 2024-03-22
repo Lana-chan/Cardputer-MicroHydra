@@ -252,8 +252,8 @@ class M5Sound:
 				sbstart = int(registers.sample.start)>>1
 				sbend = int(registers.sample.end)>>1
 			bsmp = int(smp[ptr-sbstart])
-			bsmp_int = 0 - (0b10000000000000000 - int(smp[ptr-sbstart])) if bsmp & 0b1000000000000000 else bsmp
-			buf_int = 0 - (0b10000000000000000 - int(buf[i])) if buf[i] & 0b1000000000000000 else buf[i]
+			bsmp_int = (int(smp[ptr-sbstart]) - 0b10000000000000000) if bsmp & 0b1000000000000000 else bsmp
+			buf_int = (int(buf[i]) - 0b10000000000000000) if buf[i] & 0b1000000000000000 else buf[i]
 			if vol < 0:
 				bsmp_int <<= (0-vol)
 			else:
